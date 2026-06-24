@@ -1,163 +1,121 @@
-# Object Detection using YOLOv8 + Raspberry Pi 🚁📷
+# Object Detection + Distance Estimation
 
-A real-time object detection system using **YOLOv8**, where a **Raspberry Pi streams video frames** to a laptop/server for fast AI inference. Designed for robotics, drones, and edge-AI applications.
+Real-time YOLO object detection for Raspberry Pi 5 / laptop workflows. The updated scripts detect:
 
-## Features
+- `person`
+- `ct`, meaning count of people
+- optional COCO vehicle classes such as `bus` and `motorcycle`
 
-- Real-time object detection with YOLOv8
-- Raspberry Pi camera streaming over sockets
-- Laptop/server-side inference for higher FPS
-- Lightweight and optimized architecture
-- Easy to integrate with drones/robots
-- OpenCV-based frame handling
+Distance is supported in two modes:
 
----
+- Single camera: estimates distance from detected object size and focal length.
+- Two cameras: estimates distance from stereo disparity using baseline and focal length.
 
-## Project Structure
+## Files
 
-```bash
-Object_Detection/
-│── server.py        # Runs on laptop/PC (YOLO inference)
-│── client.py        # Runs on Raspberry Pi (camera stream)
-│── requirements.txt
-│── README.md
+```text
+single_cam_detection.py        # one camera detection + distance
+stereo_cam_detection.py        # two camera detection + stereo distance
+vision_utils.py                # shared detection, drawing, distance helpers
+evaluate_distance_accuracy.py  # computes MAE/RMSE/MAPE/accuracy from measured data
+server.py / client.py          # older Pi-to-laptop streaming demo
 ```
 
----
-
-## How It Works
-
-1. Raspberry Pi captures frames using the camera.
-2. Frames are serialized and sent over WiFi using sockets.
-3. Laptop receives frames.
-4. YOLOv8 performs object detection.
-5. Detected objects are displayed in real time.
-
----
-
-## Tech Stack
-
-- Python
-- OpenCV
-- Ultralytics YOLOv8
-- Socket Programming
-- Raspberry Pi
-- NumPy
-
----
-
-## Installation
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/YasasviAvvaru/Object_Detection.git
-cd Object_Detection
-```
-
-### 2. Install dependencies
+## Install
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Or manually:
+For Raspberry Pi camera support, install Picamera2 through Raspberry Pi OS packages:
 
 ```bash
-pip install ultralytics opencv-python numpy
+sudo apt install python3-picamera2
 ```
 
----
-
-## Running the Project
-
-### Step 1: Run the server on Laptop/PC
+## Single Camera
 
 ```bash
-python server.py
+python single_cam_detection.py --backend picamera2 --camera 0 --classes person --imgsz 320 --conf 0.35
 ```
 
-This starts the YOLO inference server.
-
----
-
-### Step 2: Run the client on Raspberry Pi
-
-Update the laptop IP address inside `client.py`:
-
-```python
-HOST = "YOUR_LAPTOP_IP"
-```
-
-Then run:
+Useful options:
 
 ```bash
-python client.py
+python single_cam_detection.py --hfov 66
+python single_cam_detection.py --focal-px 560
+python single_cam_detection.py --save-csv single_log.csv
 ```
 
----
+Pi Camera Module 3 approximate horizontal FOV:
 
-## Example Workflow
+- Standard lens: about `66` degrees
+- Wide lens: about `102` degrees
+
+Use `--focal-px` after calibration for better distance accuracy. `--hfov` is only an approximation.
+
+## Two Cameras / Stereo
+
+Mount both cameras horizontally, same height, looking straight ahead. Measure the distance between lens centers and pass it as `--baseline-m`.
+
+```bash
+python stereo_cam_detection.py --backend picamera2 --left-camera 0 --right-camera 1 --baseline-m 0.10 --classes person --imgsz 320
+```
+
+For good stereo accuracy, the two camera images should be aligned and calibrated. The current script assumes the cameras are roughly parallel and rectified. If the two images are vertically shifted or angled, stereo distance will be noisy.
+
+## Speed Tips for Raspberry Pi 5
+
+- Start with `yolov8n.pt`.
+- Use `--imgsz 320` for best speed, `416` or `640` for more accuracy.
+- Use `--width 640 --height 480`.
+- Keep `--conf` around `0.35` to reduce false positives.
+- If running on a laptop/server, use `--device 0` for CUDA GPU.
+
+## Accuracy Measurement
+
+You cannot know real accuracy without ground-truth measured distances. To compare one-camera and two-camera distance:
+
+1. Put people at known distances, for example `1m, 2m, 3m, 5m`.
+2. Record predicted distance from the scripts.
+3. Create a CSV like this:
+
+```csv
+method,label,predicted_m,actual_m
+single,person,2.34,2.00
+stereo,person,2.08,2.00
+```
+
+4. Run:
+
+```bash
+python evaluate_distance_accuracy.py accuracy_samples.csv
+```
+
+Output includes:
+
+- MAE in meters
+- RMSE in meters
+- MAPE percentage
+- distance accuracy percentage, computed as `100 - MAPE`
+
+Expected behavior after calibration:
+
+- Single camera: usually less accurate because it assumes average person height.
+- Two cameras: usually more accurate at close/medium range if baseline, focal length, and alignment are correct.
+
+## Notes
+
+For best single-camera distance, calibrate focal length:
 
 ```text
-Raspberry Pi Camera
-        ↓
- Frame Streaming via WiFi
-        ↓
-Laptop/PC Server
-        ↓
- YOLOv8 Inference
-        ↓
- Real-time Detection Output
+focal_px = (known_distance_m * object_pixel_size) / real_object_size_m
 ```
 
----
+For stereo:
 
-## Applications
+```text
+distance_m = (focal_px * baseline_m) / disparity_px
+```
 
-- Autonomous drones
-- Surveillance systems
-- Robotics
-- Smart navigation
-- Real-time AI vision systems
-
----
-
-## Future Improvements
-
-- Multi-threaded streaming
-- FPS optimization
-- TensorRT acceleration
-- Tracking integration (DeepSORT/ByteTrack)
-- ROS integration
-- On-device inference on Raspberry Pi
-
----
-
-## Sample Detection Classes
-
-YOLOv8 can detect:
-- Person
-- Car
-- Bicycle
-- Dog
-- Bottle
-- Chair
-- and many more...
-
----
-
-## Requirements
-
-- Raspberry Pi with camera module
-- Laptop/PC with GPU (recommended)
-- Stable WiFi connection
-- Python 3.9+
-
----
-
-## Author
-
-Created by Yasasvi Avvaru
-
-GitHub: https://github.com/YasasviAvvaru
+Measure your own average person height in `vision_utils.py` if your target users differ from the default `1.70 m`.
