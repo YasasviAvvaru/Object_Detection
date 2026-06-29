@@ -11,6 +11,14 @@ Distance is supported in two modes:
 - Single camera: estimates distance from detected object size and focal length.
 - Two cameras: estimates distance from stereo disparity using baseline and focal length.
 
+## setting up connection
+1) Make sure laptop and raspi are connected to same wifi network(not IITD WIFI).
+2) in raspi -> hostname -I (find ip and put it in laptops client.py) 
+3) in raspi terminal -> python server.py
+4) in laptop terminal -> python client.py
+5) for faster running 
+    a)decrease imgsz to 320 in client.py
+    b)decrease jpeg quality to 75 in server.py
 ## Files
 
 ```text
