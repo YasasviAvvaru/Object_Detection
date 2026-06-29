@@ -1,55 +1,126 @@
 # Object Detection + Distance Estimation
 
-Real-time YOLO object detection for Raspberry Pi 5 / laptop workflows. The updated scripts detect:
+Real-time YOLO object detection for Raspberry Pi / laptop workflows using OpenCV, Ultralytics YOLO, and optional stereo distance estimation.
 
-- `person`
-- `ct`, meaning count of people
-- optional COCO vehicle classes such as `bus` and `motorcycle`
+The project supports:
 
-Distance is supported in two modes:
+- Person detection and people counting (`person`, `ct`, or `count`)
+- Vehicle detection for supported COCO classes (`car`, `truck`, `bus`, `motorcycle`)
+- Single-camera distance estimation from object size
+- Two-camera stereo distance estimation from disparity
+- Pi-to-laptop streaming for running heavier detection on the laptop
 
-- Single camera: estimates distance from detected object size and focal length.
-- Two cameras: estimates distance from stereo disparity using baseline and focal length.
-
-## setting up connection
-1) Make sure laptop and raspi are connected to same wifi network(not IITD WIFI).
-2) in raspi -> hostname -I (find ip and put it in laptops client.py) 
-3) in raspi terminal -> python server.py
-4) in laptop terminal -> python client.py
-5) for faster running 
-    a)decrease imgsz to 320 in client.py
-    b)decrease jpeg quality to 75 in server.py
 ## Files
 
 ```text
-single_cam_detection.py        # one camera detection + distance
-stereo_cam_detection.py        # two camera detection + stereo distance
-vision_utils.py                # shared detection, drawing, distance helpers
-evaluate_distance_accuracy.py  # computes MAE/RMSE/MAPE/accuracy from measured data
-server.py / client.py          # older Pi-to-laptop streaming demo
+single_cam_detection.py        # local one-camera YOLO detection + distance
+stereo_cam_detection.py        # local two-camera YOLO detection + stereo distance
+vision_utils.py                # shared camera, detection, drawing, and distance helpers
+evaluate_distance_accuracy.py  # computes MAE/RMSE/MAPE/accuracy from measured CSV data
+
+server.py                      # one-camera Raspberry Pi streaming server
+client.py                      # one-camera laptop receiver/viewer
+Two_camera_server.py           # two-camera Raspberry Pi streaming server
+Two_camera_client.py           # laptop stereo receiver + YOLO + distance display
 ```
 
 ## Install
+
+Install Python packages:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-For Raspberry Pi camera support, install Picamera2 through Raspberry Pi OS packages:
+For Raspberry Pi Camera Module support, install Picamera2 through Raspberry Pi OS packages:
 
 ```bash
 sudo apt install python3-picamera2
 ```
 
-## Single Camera
+If `yolov8n.pt` is not already present, Ultralytics will download it the first time you run a YOLO script.
+
+## Network Setup
+
+Use this setup when the Raspberry Pi captures frames and the laptop receives or processes them.
+
+1. Connect the Raspberry Pi and laptop to the same Wi-Fi network. Avoid networks that block device-to-device traffic.
+2. On the Raspberry Pi, find its IP address:
 
 ```bash
-python single_cam_detection.py --backend picamera2 --camera 0 --classes person --imgsz 320 --conf 0.35
+hostname -I
+```
+
+3. Put that IP address into the laptop client script:
+
+```python
+PI_IP = "192.168.x.x"
+```
+
+For `client.py`, update:
+
+```python
+client_socket.connect(("192.168.x.x", 8485))
+```
+
+Port `8485` is used by both streaming examples.
+
+## One-Camera Streaming
+
+Run this when one camera is connected to the Raspberry Pi and frames are viewed or processed on the laptop.
+
+On the Raspberry Pi:
+
+```bash
+python server.py
+```
+
+On the laptop:
+
+```bash
+python client.py
+```
+
+Press `q` in the display window to quit.
+
+## Two-Camera Streaming
+
+Run this when two cameras are connected to the Raspberry Pi and stereo distance is computed on the laptop.
+
+On the Raspberry Pi:
+
+```bash
+python Two_camera_server.py
+```
+
+On the laptop:
+
+```bash
+python Two_camera_client.py
+```
+
+Before running, edit `Two_camera_client.py`:
+
+```python
+PI_IP = "192.168.x.x"
+baseline_m = 0.10
+focal_px = 492.0
+```
+
+`baseline_m` is the distance between the two camera lens centers in meters. `focal_px` should be calibrated for the image width used by the server. The current two-camera server captures each camera at `320x240`, stitches them into one `640x240` frame, and sends JPEG frames at quality `80`.
+
+## Local Single-Camera Detection
+
+Run detection directly on the machine with the camera:
+
+```bash
+python single_cam_detection.py --backend auto --camera 0 --classes person --imgsz 320 --conf 0.35
 ```
 
 Useful options:
 
 ```bash
+python single_cam_detection.py --classes person,car,bus,motorcycle
 python single_cam_detection.py --hfov 66
 python single_cam_detection.py --focal-px 560
 python single_cam_detection.py --save-csv single_log.csv
@@ -62,30 +133,37 @@ Pi Camera Module 3 approximate horizontal FOV:
 
 Use `--focal-px` after calibration for better distance accuracy. `--hfov` is only an approximation.
 
-## Two Cameras / Stereo
+## Local Two-Camera Detection
 
-Mount both cameras horizontally, same height, looking straight ahead. Measure the distance between lens centers and pass it as `--baseline-m`.
+Run stereo detection directly on the machine with both cameras:
 
 ```bash
-python stereo_cam_detection.py --backend picamera2 --left-camera 0 --right-camera 1 --baseline-m 0.10 --classes person --imgsz 320
+python stereo_cam_detection.py --backend auto --left-camera 0 --right-camera 1 --baseline-m 0.10 --classes person --imgsz 320
 ```
 
-For good stereo accuracy, the two camera images should be aligned and calibrated. The current script assumes the cameras are roughly parallel and rectified. If the two images are vertically shifted or angled, stereo distance will be noisy.
+For good stereo accuracy:
 
-## Speed Tips for Raspberry Pi 5
+- Mount both cameras horizontally at the same height.
+- Keep both cameras pointing straight ahead.
+- Measure the distance between lens centers and pass it as `--baseline-m`.
+- Calibrate `--focal-px` if possible.
+- Keep the two images aligned and rectified. Vertical shift or angled cameras will make distance noisy.
 
-- Start with `yolov8n.pt`.
-- Use `--imgsz 320` for best speed, `416` or `640` for more accuracy.
-- Use `--width 640 --height 480`.
+## Speed Tips
+
+- Use `yolov8n.pt` for the fastest YOLO model.
+- Use `--imgsz 320` for speed; try `416` or `640` for more accuracy.
+- Use `--width 640 --height 480` for local camera scripts.
+- Lower JPEG quality in the streaming server if the network is slow.
 - Keep `--conf` around `0.35` to reduce false positives.
-- If running on a laptop/server, use `--device 0` for CUDA GPU.
+- On a CUDA laptop/server, pass `--device 0` to local YOLO scripts.
 
 ## Accuracy Measurement
 
-You cannot know real accuracy without ground-truth measured distances. To compare one-camera and two-camera distance:
+Real distance accuracy needs ground-truth measurements. To compare one-camera and two-camera distance:
 
-1. Put people at known distances, for example `1m, 2m, 3m, 5m`.
-2. Record predicted distance from the scripts.
+1. Put people or objects at known distances, for example `1m`, `2m`, `3m`, and `5m`.
+2. Record the predicted distance from the scripts.
 3. Create a CSV like this:
 
 ```csv
@@ -105,25 +183,25 @@ Output includes:
 - MAE in meters
 - RMSE in meters
 - MAPE percentage
-- distance accuracy percentage, computed as `100 - MAPE`
+- Distance accuracy percentage, computed as `100 - MAPE`
 
 Expected behavior after calibration:
 
-- Single camera: usually less accurate because it assumes average person height.
-- Two cameras: usually more accurate at close/medium range if baseline, focal length, and alignment are correct.
+- Single camera is usually less accurate because it assumes average real-world object size.
+- Two cameras are usually more accurate at close and medium range if baseline, focal length, and alignment are correct.
 
-## Notes
+## Calibration Notes
 
-For best single-camera distance, calibrate focal length:
+For single-camera distance:
 
 ```text
 focal_px = (known_distance_m * object_pixel_size) / real_object_size_m
 ```
 
-For stereo:
+For stereo distance:
 
 ```text
 distance_m = (focal_px * baseline_m) / disparity_px
 ```
 
-Measure your own average person height in `vision_utils.py` if your target users differ from the default `1.70 m`.
+For better single-camera distance, adjust the real object dimensions in `vision_utils.py`. The default person height is `1.70 m`.
